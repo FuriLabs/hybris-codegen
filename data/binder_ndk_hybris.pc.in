@@ -1,0 +1,12 @@
+prefix=@prefix@
+exec_prefix=${prefix}
+libdir=@libdir@
+includedir=${prefix}/include/binder_ndk
+
+Name: binder_ndk_hybris
+Description: Binder NDK hybris compatibility library
+Version: @VERSION@
+Libs: -L${libdir} -lbinder_ndk_hybris
+Cflags: -I${includedir}/include_cpp \
+        -I${includedir}/include_ndk \
+        -I${includedir}/include_platform
