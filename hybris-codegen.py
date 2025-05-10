@@ -4,54 +4,83 @@ import argparse
 import os
 import subprocess
 import sys
-import glob
 import shutil
 
-def find_aidl_files_in_directory(directory):
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description='Generate code for AIDL interfaces'
+    )
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        '-s', '--service',
+        help='Service name (e.g., android.hardware.vibrator)'
+    )
+    group.add_argument(
+        '-d', '--directory',
+        help='Directory containing AIDL files to process directly'
+    )
+    parser.add_argument(
+        '-p', '--path',
+        help='Base path for searching (default: aidl/interfaces)'
+    )
+    return parser.parse_args()
+
+def get_base_path(path_arg):
+    return path_arg if path_arg else os.path.join(os.getcwd(), 'aidl/interfaces')
+
+def collect_aidl_files_in_directory(directory):
     if not os.path.isdir(directory):
         print(f"Error: Directory '{directory}' not found.")
         return None, None
 
-    aidl_files = glob.glob(os.path.join(directory, '*.aidl'))
+    aidl_files = []
+    for root, _, files in os.walk(directory):
+        for f in files:
+            if f.endswith('.aidl'):
+                full = os.path.join(root, f)
+                rel  = os.path.relpath(full, directory)
+                aidl_files.append(rel)
 
     if not aidl_files:
         print(f"Error: No .aidl files found in '{directory}'.")
         return None, None
 
-    return [os.path.basename(file) for file in aidl_files], os.path.abspath(directory)
+    return aidl_files, os.path.abspath(directory)
 
-def find_aidl_files(base_path, service_name):
-    service_parts = service_name.split('.')
+def collect_aidl_files_by_service(base_path, service_name):
+    parts = service_name.split('.')
+    last  = parts[-1]
 
-    # Get the last component of the service name for interfaces path
-    last_component = service_parts[-1]
-
-    api_current_dir = os.path.join(
-        base_path, last_component,
+    api_current = os.path.join(
+        base_path, last,
         'aidl/aidl_api', service_name, 'current'
     )
+    subpath = os.path.join(*parts)
+    svc_dir = os.path.join(api_current, subpath)
 
-    service_subpath = os.path.join(*service_parts)
-    interfaces_service_path = os.path.join(api_current_dir, service_subpath)
-
-    if not os.path.isdir(interfaces_service_path):
-        print(f"Error: Service path '{interfaces_service_path}' not found.")
+    if not os.path.isdir(svc_dir):
+        print(f"Error: Service path '{svc_dir}' not found.")
         return None, None, None
 
-    aidl_files = []
-    for file in os.listdir(interfaces_service_path):
-        if file.endswith('.aidl'):
-            aidl_files.append(os.path.join(service_subpath, file))
-
+    aidl_files = [
+        os.path.join(subpath, f)
+        for f in os.listdir(svc_dir)
+        if f.endswith('.aidl')
+    ]
     if not aidl_files:
-        print(f"Error: No .aidl files found in '{interfaces_service_path}'.")
+        print(f"Error: No .aidl files found in '{svc_dir}'.")
         return None, None, None
 
-    return aidl_files, api_current_dir, service_name
+    return aidl_files, api_current, service_name
 
-def run_aidl_command(aidl_files, api_directory, service_name=None):
+def cleanup_leftovers(api_directory):
+    for subdir in ('cpp', 'include'):
+        path = os.path.join(api_directory, subdir)
+        if os.path.exists(path):
+            shutil.rmtree(path)
+
+def generate_code(aidl_files, api_directory, service_name=None):
     original_dir = os.getcwd()
-
     os.chdir(api_directory)
 
     cmd = [
@@ -62,116 +91,84 @@ def run_aidl_command(aidl_files, api_directory, service_name=None):
         '--out=cpp/',
         '--header_out=include/',
         '-I.'
-    ]
-    cmd.extend(aidl_files)
-
-#    print(f"Executing command in directory: {api_directory}")
-#    print(' '.join(cmd))
+    ] + aidl_files
 
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-#        print("AIDL command completed successfully.")
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
 
-        cpp_dir = os.path.join(api_directory, 'cpp')
-        include_dir = os.path.join(api_directory, 'include')
+        # Move generated output back to original directory
+        for subdir in ('cpp', 'include'):
+            src = os.path.join(api_directory, subdir)
+            dst = os.path.join(original_dir, subdir)
+            if os.path.exists(src):
+                if os.path.exists(dst):
+                    shutil.rmtree(dst)
+                shutil.move(src, dst)
 
-        if os.path.exists(cpp_dir):
-            cpp_dest = os.path.join(original_dir, 'cpp')
-            if os.path.exists(cpp_dest):
-                shutil.rmtree(cpp_dest)
-            shutil.move(cpp_dir, original_dir)
-#            print(f"Moved cpp/ to {original_dir}")
-
-        if os.path.exists(include_dir):
-            include_dest = os.path.join(original_dir, 'include')
-            if os.path.exists(include_dest):
-                shutil.rmtree(include_dest)
-            shutil.move(include_dir, original_dir)
-#            print(f"Moved include/ to {original_dir}")
-
+        # Collect generated .cpp files
+        cpp_root = os.path.join(original_dir, 'cpp')
         cpp_files = []
-        cpp_path = os.path.join(original_dir, 'cpp')
-
         if service_name:
-            # Convert service_name with dots to path with slashes
-            service_path = service_name.replace('.', '/')
-            search_path = os.path.join(cpp_path, service_path)
-
-            if os.path.exists(search_path):
-                for root, _, files in os.walk(search_path):
-                    for file in files:
-                        if file.endswith('.cpp'):
-                            rel_path = os.path.relpath(os.path.join(root, file), cpp_path)
-                            cpp_files.append(rel_path)
+            svc_path = service_name.replace('.', '/')
+            search = os.path.join(cpp_root, svc_path)
+            iterator = os.walk(search) if os.path.isdir(search) else []
         else:
-            # No service name, just walk the entire cpp directory
-            for root, _, files in os.walk(cpp_path):
-                for file in files:
-                    if file.endswith('.cpp'):
-                        rel_path = os.path.relpath(os.path.join(root, file), cpp_path)
-                        cpp_files.append(rel_path)
+            iterator = os.walk(cpp_root)
+
+        for root, _, files in iterator:
+            for f in files:
+                if f.endswith('.cpp'):
+                    rel = os.path.relpath(os.path.join(root, f), cpp_root)
+                    cpp_files.append(rel)
+
         return True, cpp_files
+
     except subprocess.CalledProcessError as e:
-        print(f"Error: AIDL command failed with exit code {e.returncode}")
-        print(f"Error output:\n{e.stderr}")
+        cleanup_leftovers(api_directory)
+        print(f"Error: AIDL command failed (exit {e.returncode})\n{e.stderr}")
         return False, None
+
     except Exception as e:
-        print(f"Error: Failed to move or process generated files: {str(e)}")
+        cleanup_leftovers(api_directory)
+        print(f"Error: {e}")
         return False, None
+
     finally:
         os.chdir(original_dir)
 
+def service_flow(service, base_path):
+    aidl_files, api_dir, svc = collect_aidl_files_by_service(base_path, service)
+    if not aidl_files:
+        return False, None
+    return generate_code(aidl_files, api_dir, svc)
+
+def directory_flow(directory):
+    aidl_files, api_dir = collect_aidl_files_in_directory(directory)
+    if not aidl_files:
+        return False, None
+    return generate_code(aidl_files, api_dir)
+
 def main():
-    parser = argparse.ArgumentParser(
-        description='Generate code for AIDL interfaces'
-    )
-
-    input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument(
-        '-s', '--service',
-        help='Service name (e.g., android.hardware.vibrator)'
-    )
-    input_group.add_argument(
-        '-d', '--directory',
-        help='Directory containing AIDL files to process directly'
-    )
-    parser.add_argument(
-        '-p', '--path',
-        help='Base path for searching (default: aidl/interfaces)'
-    )
-
-    args = parser.parse_args()
-
-    if args.path:
-        base_path = args.path
-    else:
-        base_path = os.path.join(os.getcwd(), 'aidl/interfaces')
+    args      = parse_arguments()
+    base_path = get_base_path(args.path)
 
     if args.service and not os.path.isdir(base_path):
         print(f"Error: Base path '{base_path}' not found.")
         sys.exit(1)
 
     if args.directory:
-        aidl_files, api_directory = find_aidl_files_in_directory(args.directory)
-        if not aidl_files:
-            sys.exit(1)
-        service_name = None
+        success, cpp_files = directory_flow(args.directory)
     else:
-        aidl_files, api_directory, service_name = find_aidl_files(base_path, args.service)
-        if not aidl_files:
-            sys.exit(1)
-
-    success, cpp_files = run_aidl_command(aidl_files, api_directory, service_name)
+        success, cpp_files = service_flow(args.service, base_path)
 
     if not success:
         sys.exit(1)
 
-    if cpp_files:
-#        print("\nGenerated CPP files:")
-        for file in cpp_files:
-            print(f"cpp/{file}")
+    for f in cpp_files:
+        print(f"cpp/{f}")
 
     sys.exit(0)
 
 if __name__ == "__main__":
     main()
+
