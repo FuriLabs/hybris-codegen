@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2025 Bardia Moshiri <bardia@furilabs.com>
+
 import argparse
 import os
 import subprocess
@@ -28,6 +31,11 @@ def parse_arguments():
         '-i', '--include-out',
         default='include',
         help='Directory for generated headers (absolute or relative; default: include)'
+    )
+    parser.add_argument(
+        '--stability',
+        help='Stability flag to pass to aidl (e.g., vintf). If omitted, no stability flag is passed.',
+        default=None
     )
     return parser.parse_args()
 
@@ -65,11 +73,10 @@ def collect_aidl_files_by_service(base_path, service_name):
         print(f"Error: No .aidl files found in '{svc_dir}'.")
         return None, None, None
 
-    # we want them relative to svc_dir
     aidl_files = [os.path.join(subpath, f) for f in aidl_files]
     return aidl_files, api_current, service_name
 
-def generate_code(aidl_files, api_directory, service_name, cpp_out, include_out):
+def generate_code(aidl_files, api_directory, service_name, cpp_out, include_out, stability):
     cpp_path = Path(cpp_out)
     inc_path = Path(include_out)
     if not cpp_path.is_absolute():
@@ -84,10 +91,14 @@ def generate_code(aidl_files, api_directory, service_name, cpp_out, include_out)
 
     cwd = os.getcwd()
     os.chdir(api_directory)
+
     cmd = [
         'aidl',
         '--lang=ndk',
-        '--stability=vintf',
+    ]
+    if stability:
+        cmd.append(f'--stability={stability}')
+    cmd += [
         '--structured',
         f'--out={cpp_path}',
         f'--header_out={inc_path}',
@@ -107,7 +118,6 @@ def generate_code(aidl_files, api_directory, service_name, cpp_out, include_out)
     finally:
         os.chdir(cwd)
 
-    # Walk the generated tree to list all .cpp files
     search_root = cpp_path
     if service_name:
         svc_sub = service_name.replace('.', '/')
@@ -130,17 +140,17 @@ def generate_code(aidl_files, api_directory, service_name, cpp_out, include_out)
 
     return True, cpp_files
 
-def service_flow(service, base_path, cpp_out, include_out):
+def service_flow(service, base_path, cpp_out, include_out, stability):
     aidl_files, api_dir, svc = collect_aidl_files_by_service(base_path, service)
     if not aidl_files:
         return False, None
-    return generate_code(aidl_files, api_dir, svc, cpp_out, include_out)
+    return generate_code(aidl_files, api_dir, svc, cpp_out, include_out, stability)
 
-def directory_flow(directory, cpp_out, include_out):
+def directory_flow(directory, cpp_out, include_out, stability):
     aidl_files, api_dir = collect_aidl_files_in_directory(directory)
     if not aidl_files:
         return False, None
-    return generate_code(aidl_files, api_dir, None, cpp_out, include_out)
+    return generate_code(aidl_files, api_dir, None, cpp_out, include_out, stability)
 
 def main():
     args = parse_arguments()
@@ -149,14 +159,20 @@ def main():
         if not os.path.isdir(base):
             print(f"Error: Base path '{base}' not found.")
             sys.exit(1)
-        success, cpp_files = service_flow(args.service,
-                                          base,
-                                          args.cpp_out,
-                                          args.include_out)
+        success, cpp_files = service_flow(
+            args.service,
+            base,
+            args.cpp_out,
+            args.include_out,
+            args.stability
+        )
     else:
-        success, cpp_files = directory_flow(args.directory,
-                                            args.cpp_out,
-                                            args.include_out)
+        success, cpp_files = directory_flow(
+            args.directory,
+            args.cpp_out,
+            args.include_out,
+            args.stability
+        )
 
     if not success:
         sys.exit(1)
