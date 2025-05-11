@@ -9,4 +9,7 @@ Version: @VERSION@
 Libs: -L${libdir} -lbinder_ndk_hybris
 Cflags: -I${includedir}/include_cpp \
         -I${includedir}/include_ndk \
-        -I${includedir}/include_platform
+        -I${includedir}/include_platform \
+        -Wno-unknown-pragmas \
+        -Wno-subobject-linkage \
+        -Wno-deprecated-declarations
