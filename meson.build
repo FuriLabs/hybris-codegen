@@ -30,8 +30,8 @@ foreach sub : ['include_ndk', 'include_platform', 'include_cpp']
   )
 endforeach
 
-py_mod_dir = join_paths(get_option('libdir'),
-                        'python3/dist-packages/mesonbuild/modules')
+py_mod_dir = join_paths(get_option('prefix'),
+                        'lib/python3/dist-packages/mesonbuild/modules')
 install_data(
   'mesonbuild/hybris_codegen.py',
   install_dir: py_mod_dir
