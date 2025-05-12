@@ -1,0 +1,4 @@
+[submodule "aidl/interfaces"]
+	path = aidl/interfaces
+	url = https://android.googlesource.com/platform/hardware/interfaces/
+	commit = 5ecadeb354186260fbf2cb223eb712c79b640119
