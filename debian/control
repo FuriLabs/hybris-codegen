@@ -13,5 +13,7 @@ Vcs-Git: https://github.com/furilabs/hybris-codegen.git
 Package: hybris-codegen
 Architecture: any
 Depends: ${misc:Depends},
-         ${shlibs:Depends}
+         ${shlibs:Depends},
+         meson,
+         aidl,
 Description: hybris-codegen allows to generate AIDL code at compile-time
